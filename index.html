@@ -10,6 +10,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Grocery Run">
   <link rel="apple-touch-icon" href="https://img.icons8.com/color/180/shopping-cart.png">
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
   <style>
     :root {
@@ -271,6 +272,44 @@
     .btn-add-item:disabled {
       opacity: 0.5;
     }
+
+    .btn-scan {
+      background: var(--input-bg);
+      color: var(--accent-blue);
+      border: 1px solid var(--border-color);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .btn-scan:disabled {
+      opacity: 0.65;
+      cursor: wait;
+    }
+
+    .scan-status {
+      min-height: 1rem;
+      color: var(--text-secondary);
+      font-size: 0.75rem;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 0.8rem;
+      height: 0.8rem;
+      margin-right: 0.35rem;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: -0.08rem;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
@@ -296,11 +335,14 @@
       <input type="text" id="newItemName" class="input-name" placeholder="Item Name" oninput="validateInput()" onkeydown="handleItemNameKeydown(event)">
       <input type="number" step="0.01" id="newItemPrice" class="input-price" placeholder="Price" oninput="validateInput()" onkeydown="handleItemPriceKeydown(event)">
     </div>
+    <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden onchange="processScan(event)">
     
     <div class="input-group">
       <div class="segmented-picker" id="shopperPicker"></div>
+      <button class="btn-scan" id="scanButton" type="button" onclick="document.getElementById('cameraInput').click()" aria-label="Scan a price tag" title="Scan a price tag">📷</button>
       <button class="btn-add-item" id="addItemBtn" disabled onclick="addItem()">Add</button>
     </div>
+    <p class="scan-status" id="scanStatus" aria-live="polite"></p>
   </div>
 
   <script>
@@ -511,6 +553,41 @@
       if (event.key === 'Enter') {
         event.preventDefault();
         addItem();
+      }
+    }
+
+    async function processScan(event) {
+      const image = event.target.files?.[0];
+      if (!image) return;
+
+      const scanButton = document.getElementById('scanButton');
+      const scanStatus = document.getElementById('scanStatus');
+      const nameInput = document.getElementById('newItemName');
+      const priceInput = document.getElementById('newItemPrice');
+
+      scanButton.disabled = true;
+      scanButton.innerHTML = '<span class="spinner" aria-hidden="true"></span>Scanning';
+      scanStatus.textContent = 'Reading price tag…';
+
+      try {
+        const { data: { text } } = await Tesseract.recognize(image, 'eng');
+        const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        const priceMatch = text.match(/\b\d+\.\d{2}\b/);
+
+        if (lines[0]) nameInput.value = lines[0];
+        if (priceMatch) priceInput.value = priceMatch[0];
+
+        scanStatus.textContent = priceMatch
+          ? 'Price tag scanned. Review the details, then add the item.'
+          : 'Text scanned. Add or correct the price before adding the item.';
+        validateInput();
+      } catch (error) {
+        console.error('Price tag scan failed:', error);
+        scanStatus.textContent = 'Could not read that photo. Please try another image.';
+      } finally {
+        scanButton.disabled = false;
+        scanButton.textContent = '📷';
+        event.target.value = '';
       }
     }
 
