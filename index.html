@@ -9,7 +9,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Grocery Run">
-  <link rel="apple-touch-icon" href="https://img.icons8.com/color/180/shopping-cart.png">
+  <meta name="theme-color" content="#000000">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icon.svg">
+  <script type="module" src="./src/ocr.js"></script>
 
   <style>
     :root {
@@ -214,6 +217,10 @@
       flex-direction: column;
       gap: 10px;
       border-top: 1px solid var(--border-color);
+      max-height: 58vh;
+      max-height: 58dvh;
+      overflow-y: auto;
+      flex-shrink: 0;
     }
 
     .input-group {
@@ -271,6 +278,151 @@
     .btn-add-item:disabled {
       opacity: 0.5;
     }
+
+    .btn-scan {
+      background: var(--input-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      color: var(--accent-blue);
+      cursor: pointer;
+      font-size: 1.15rem;
+      min-width: 48px;
+      padding: 8px 12px;
+    }
+
+    .btn-scan:disabled {
+      cursor: wait;
+      opacity: 0.6;
+    }
+
+    .scan-status {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      min-height: 1rem;
+    }
+
+    .scan-review {
+      background: rgba(10, 132, 255, 0.12);
+      border: 1px solid rgba(10, 132, 255, 0.45);
+      border-radius: 8px;
+      color: var(--text-secondary);
+      display: grid;
+      font-size: 0.78rem;
+      gap: 3px;
+      padding: 8px 10px;
+    }
+
+    .scan-review[hidden] {
+      display: none;
+    }
+
+    .scan-review strong {
+      color: var(--text-color);
+    }
+
+    .scan-previews {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .scan-preview {
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      display: block;
+      height: 96px;
+      object-fit: contain;
+      width: 100%;
+    }
+
+    .ocr-debug {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+    }
+
+    .ocr-debug pre {
+      background: #121214;
+      border-radius: 8px;
+      margin-top: 6px;
+      max-height: 140px;
+      overflow: auto;
+      padding: 8px;
+      white-space: pre-wrap;
+    }
+
+    .ocr-debug h4 {
+      color: var(--text-color);
+      margin-top: 8px;
+    }
+
+    .camera-guide {
+      align-items: center;
+      background: rgba(0, 0, 0, 0.94);
+      display: flex;
+      inset: 0;
+      justify-content: center;
+      padding: calc(env(safe-area-inset-top) + 24px) 20px calc(env(safe-area-inset-bottom) + 24px);
+      position: fixed;
+      z-index: 1000;
+    }
+
+    .camera-guide[hidden] {
+      display: none;
+    }
+
+    .camera-guide-content {
+      align-items: center;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      max-width: 520px;
+      text-align: center;
+      width: 100%;
+    }
+
+    .tag-guide-frame {
+      align-items: center;
+      aspect-ratio: 3 / 2;
+      border: 3px solid var(--accent-green);
+      border-radius: 14px;
+      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.18);
+      display: flex;
+      justify-content: center;
+      max-width: 460px;
+      width: 88vw;
+    }
+
+    .tag-guide-frame span {
+      background: rgba(0, 0, 0, 0.72);
+      border-radius: 6px;
+      color: white;
+      font-size: 0.85rem;
+      padding: 6px 10px;
+    }
+
+    .camera-guide-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .camera-guide-actions button {
+      border: 0;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 12px 18px;
+    }
+
+    .btn-open-camera {
+      background: var(--accent-blue);
+      color: white;
+      font-weight: 600;
+    }
+
+    .btn-cancel-camera {
+      background: var(--input-bg);
+      color: white;
+    }
   </style>
 </head>
 <body>
@@ -292,14 +444,46 @@
 
   <!-- STICKY FOOTER -->
   <div class="footer">
+    <div class="scan-review" id="scanReview" role="status" hidden>
+      <strong>Review scanned item</strong>
+      <span id="scanReviewMessage"></span>
+    </div>
     <div class="input-group">
-      <input type="text" id="newItemName" class="input-name" placeholder="Item Name" oninput="validateInput()" onkeydown="handleItemNameKeydown(event)">
-      <input type="number" step="0.01" id="newItemPrice" class="input-price" placeholder="Price" oninput="validateInput()" onkeydown="handleItemPriceKeydown(event)">
+      <input type="text" id="newItemName" class="input-name" placeholder="Item Name" aria-label="Item name" enterkeyhint="next" oninput="validateInput()" onkeydown="handleItemNameKeydown(event)">
+      <input type="number" step="0.01" min="0" inputmode="decimal" id="newItemPrice" class="input-price" placeholder="Price" aria-label="Item price" enterkeyhint="done" oninput="validateInput()" onkeydown="handleItemPriceKeydown(event)">
     </div>
     
     <div class="input-group">
       <div class="segmented-picker" id="shopperPicker"></div>
+      <button class="btn-scan" id="scanButton" type="button" onclick="openCameraGuide()" aria-label="Photograph a price tag" title="Photograph a price tag" disabled>📷</button>
       <button class="btn-add-item" id="addItemBtn" disabled onclick="addItem()">Add</button>
+    </div>
+    <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden onchange="processScan(event)">
+    <p class="scan-status" id="scanStatus" role="status" aria-live="polite"></p>
+    <div class="scan-previews">
+      <img class="scan-preview" id="scanPreview" alt="Captured shelf tag preview" hidden>
+      <img class="scan-preview" id="processedPreview" alt="Grayscale, contrast-adjusted shelf tag preview" hidden>
+    </div>
+    <details class="ocr-debug" id="ocrDebug" hidden>
+      <summary>Compare OCR output</summary>
+      <h4>Original image</h4>
+      <pre id="ocrRawText"></pre>
+      <h4>Jimp grayscale + contrast</h4>
+      <pre id="ocrProcessedText"></pre>
+      <h4>Price candidates (largest box wins)</h4>
+      <pre id="ocrParseOutput"></pre>
+    </details>
+  </div>
+
+  <div class="camera-guide" id="cameraGuide" role="dialog" aria-modal="true" aria-labelledby="cameraGuideTitle" hidden>
+    <div class="camera-guide-content">
+      <h2 id="cameraGuideTitle">Center the entire shelf tag</h2>
+      <div class="tag-guide-frame"><span>Keep the label flat, sharp, and well lit</span></div>
+      <p>The green rectangle shows the ideal framing. The iPhone camera opens after you continue.</p>
+      <div class="camera-guide-actions">
+        <button class="btn-cancel-camera" type="button" onclick="closeCameraGuide()">Cancel</button>
+        <button class="btn-open-camera" id="openCameraButton" type="button" onclick="startCameraCapture()">Open Camera</button>
+      </div>
     </div>
   </div>
 
@@ -496,6 +680,11 @@
 
         nameInput.value = '';
         priceInput.value = '';
+        document.getElementById('scanReview').hidden = true;
+        document.getElementById('scanStatus').textContent = '';
+        document.getElementById('ocrDebug').hidden = true;
+        document.getElementById('scanPreview').hidden = true;
+        document.getElementById('processedPreview').hidden = true;
         saveData();
       }
     }
@@ -540,20 +729,20 @@
 
     function validateInput() {
       const name = document.getElementById('newItemName').value.trim();
-      const price = document.getElementById('newItemPrice').value.trim();
-      document.getElementById('addItemBtn').disabled = !(name && price && state.selectedProfileId);
+      const priceInput = document.getElementById('newItemPrice');
+      const priceIsValid = priceInput.value !== '' && Number.isFinite(priceInput.valueAsNumber) && priceInput.valueAsNumber >= 0;
+      document.getElementById('addItemBtn').disabled = !(name && priceIsValid && state.selectedProfileId);
     }
 
     // INITIALIZATION & SERVICE WORKER (OFFLINE SUPPORT)
     loadData();
 
     if ('serviceWorker' in navigator) {
-      const swCode = `
-        self.addEventListener('install', e => e.waitUntil(caches.open('pwa-v1').then(c => c.addAll(['./']))));
-        self.addEventListener('fetch', e => e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))));
-      `;
-      const blob = new Blob([swCode], { type: 'application/javascript' });
-      navigator.serviceWorker.register(URL.createObjectURL(blob));
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(error => {
+          console.warn('Offline service worker was not registered:', error);
+        });
+      });
     }
   </script>
 </body>
