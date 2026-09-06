@@ -295,6 +295,31 @@
       font-size: 0.75rem;
     }
 
+    .trip-history { position: fixed; right: 12px; top: 72px; z-index: 20; max-width: calc(100vw - 24px); display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
+    .trip-history button, .trip-history-panel { pointer-events: auto; }
+    .trip-history button { background: var(--card-bg); color: var(--text-color); border: 1px solid var(--text-secondary); border-radius: 20px; padding: 10px 14px; cursor: pointer; }
+    .trip-history-panel { width: 320px; max-width: calc(100vw - 24px); box-sizing: border-box; background: var(--card-bg); border-radius: 16px; box-shadow: 0 6px 24px #0008; overflow: hidden; max-height: 0; opacity: 0; transform: translateY(-8px); visibility: hidden; transition: max-height .25s ease, opacity .25s ease, transform .25s ease, visibility .25s; }
+    .trip-history.open .trip-history-panel { max-height: 55dvh; opacity: 1; transform: translateY(0); visibility: visible; overflow-y: auto; }
+    .trip-history-content { padding: 14px; }
+    .trip-history-content p { color: var(--text-secondary); font-size: .8rem; }
+    .trip-history-row { padding: 10px 0; border-bottom: 1px solid #ffffff20; font-size: .85rem; overflow-wrap: anywhere; }
+    .trip-history-row button { margin: 6px 4px 0 0; font-size: .75rem; }
+    .trip-history .amount-red { color: var(--accent-red); }
+    .trip-history .amount-green { color: var(--accent-green); }
+    @media (prefers-reduced-motion: reduce) { .trip-history-panel { transition: none; } }
+
+    .archive-actions { display: flex; justify-content: flex-end; gap: 16px; padding: 6px 0; }
+    .archive-status { color: var(--text-secondary); font-size: .75rem; text-align: right; }
+    .archive-dialog { margin: auto; width: min(420px, calc(100vw - 24px)); max-height: 75dvh; padding: 18px; background: var(--card-bg); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 16px; overflow-y: auto; }
+    .archive-dialog::backdrop { background: #0007; }
+    .archive-dialog h3 { margin: 12px 0; }
+    .archive-dialog p { color: var(--text-secondary); font-size: .8rem; margin: 8px 0; }
+    .archive-toggle { display: flex; justify-content: space-between; gap: 12px; width: 100%; padding: 14px 0; background: none; border: 0; border-bottom: 1px solid var(--border-color); color: var(--text-color); text-align: left; cursor: pointer; }
+    .archive-details { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .25s ease, opacity .25s ease; }
+    .archive-details.open { grid-template-rows: 1fr; opacity: 1; }
+    .archive-details > div { min-height: 0; overflow: hidden; }
+    @media (prefers-reduced-motion: reduce) { .archive-details { transition: none; } }
+
     .spinner {
       display: inline-block;
       width: 0.8rem;
@@ -343,9 +368,339 @@
       <button class="btn-add-item" id="addItemBtn" disabled onclick="addItem()">Add</button>
     </div>
     <p class="scan-status" id="scanStatus" aria-live="polite"></p>
+    <div class="archive-actions">
+      <button class="btn-edit" type="button" onclick="showArchivedTrips()">Past trips</button>
+      <button class="btn-edit" id="finishTripButton" type="button" onclick="finishTrip()">Finish Trip</button>
+    </div>
+    <p class="archive-status" id="tripArchiveStatus" role="status"></p>
   </div>
 
+  <dialog class="archive-dialog" id="archivedTripsDialog" aria-labelledby="archivedTripsTitle">
+    <button class="btn-edit" type="button" onclick="document.getElementById('archivedTripsDialog').close()">Close</button>
+    <h3 id="archivedTripsTitle">Past trips</h3>
+    <p>Item deltas are per unit; trip totals include quantities. Items without a confirmed comparison are excluded.</p>
+    <div id="archivedTripsList" aria-live="polite"></div>
+  </dialog>
+
+  <aside class="trip-history" id="tripHistory" aria-label="Trip price history">
+    <button id="tripHistoryPill" type="button" aria-expanded="false" aria-controls="tripHistoryPanel" onclick="toggleTripHistory()">Prices this trip</button>
+    <section class="trip-history-panel" id="tripHistoryPanel" inert>
+      <div class="trip-history-content">
+        <button type="button" onclick="toggleTripHistory(false)">Close</button>
+        <h3>Price changes this trip</h3>
+        <p>Per scan versus the last recorded price. New and unconfirmed products are excluded from the total. This summary resets on reload.</p>
+        <p id="historyStorageStatus" role="status"></p>
+        <div id="tripHistoryRows"></div>
+      </div>
+    </section>
+  </aside>
+
   <script>
+    // PRICE HISTORY LOGIC START
+    function comparePriceHistory(stored, scan) {
+      if (!stored || !stored.history.length) return { status: 'new', delta: null };
+      const words = name => name.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim().split(/\s+/).slice(0, 2).join(' ');
+      if (!words(scan.name) || words(scan.name) !== words(stored.name)) return { status: 'confirmation', delta: null };
+      // Use only existing observations. Copy before sorting so saved history is untouched.
+      // Reverse first so the last appended entry wins ties between identical timestamps.
+      const prices = [...stored.history].reverse()
+        .sort((a, b) => Date.parse(b.date) - Date.parse(a.date)).slice(0, 3)
+        .map(entry => Math.round(Number(entry.price) * 100)).sort((a, b) => a - b);
+      const middle = Math.floor(prices.length / 2);
+      const median = prices.length % 2 ? prices[middle] : (prices[middle - 1] + prices[middle]) / 2;
+      // A two-price midpoint can contain half a cent; round the baseline to currency precision.
+      const cents = Math.round(Number(scan.price) * 100) - Math.round(median);
+      return { status: cents > 0 ? 'increased' : cents < 0 ? 'decreased' : 'unchanged', delta: cents / 100 };
+    }
+    // PRICE HISTORY LOGIC END
+
+    const tripScans = [];
+    let historyDatabase;
+    function openPriceHistory() {
+      if (!historyDatabase) historyDatabase = new Promise((resolve, reject) => {
+        const request = indexedDB.open('grocery-price-history', 2);
+        request.onupgradeneeded = () => {
+          if (!request.result.objectStoreNames.contains('items')) request.result.createObjectStore('items', { keyPath: 'itemNumber' });
+          if (!request.result.objectStoreNames.contains('reassignedItems')) request.result.createObjectStore('reassignedItems', { autoIncrement: true });
+          if (!request.result.objectStoreNames.contains('trips')) request.result.createObjectStore('trips', { keyPath: 'tripId' });
+        };
+        request.onsuccess = () => {
+          request.result.onversionchange = () => { request.result.close(); historyDatabase = null; };
+          resolve(request.result);
+        };
+        request.onerror = () => reject(request.error);
+        request.onblocked = () => reject(new Error('History database is blocked by another tab.'));
+      }).catch(error => { historyDatabase = null; throw error; });
+      return historyDatabase;
+    }
+
+    async function savePriceScan(scan, decision, showComparison = () => {}) {
+      const db = await openPriceHistory();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(['items', 'reassignedItems'], 'readwrite');
+        const items = transaction.objectStore('items');
+        let result;
+        const request = items.get(scan.itemNumber);
+        request.onsuccess = () => {
+          let stored = request.result;
+          result = comparePriceHistory(stored, scan);
+          if (result.status === 'confirmation' && !decision) {
+            result.previousName = stored.name;
+            return; // Do not mix two products' prices before confirmation.
+          }
+          if (decision === 'new' && stored) {
+            transaction.objectStore('reassignedItems').add(stored);
+            stored = null;
+            result = { status: 'new', delta: null };
+          } else if (decision === 'same' && stored) {
+            result = comparePriceHistory({ ...stored, name: scan.name }, scan);
+          }
+          // Publish the pre-scan comparison before appending, within the same transaction.
+          showComparison(result);
+          items.put({ itemNumber: scan.itemNumber, name: scan.name,
+            history: [...(stored?.history || []), { date: scan.date, price: scan.price }] });
+        };
+        transaction.oncomplete = () => resolve(result);
+        transaction.onabort = () => reject(transaction.error || new Error('History save aborted.'));
+        transaction.onerror = () => {}; // onabort reports failed writes, including quota errors.
+      });
+    }
+
+    async function trackPriceScan(scan) {
+      const entry = { ...scan, date: new Date().toISOString(), status: 'unavailable', delta: null };
+      tripScans.push(entry);
+      if (!scan.itemNumber || !scan.name || scan.price === null || !Number.isFinite(scan.price)) {
+        entry.status = 'incomplete';
+      } else {
+        try { Object.assign(entry, await savePriceScan(entry, undefined, result => {
+          Object.assign(entry, result);
+          renderTripHistory();
+        })); }
+        catch {
+          Object.assign(entry, { status: 'unavailable', delta: null });
+          document.getElementById('historyStorageStatus').textContent = 'Price history could not be saved. Scanning and adding items still work.';
+        }
+      }
+      renderTripHistory();
+    }
+
+    async function confirmPriceProduct(entry, decision) {
+      const previous = { ...entry };
+      entry.busy = true;
+      renderTripHistory();
+      try { Object.assign(entry, await savePriceScan(entry, decision, result => {
+        Object.assign(entry, result);
+        renderTripHistory();
+      })); }
+      catch {
+        Object.assign(entry, previous);
+        document.getElementById('historyStorageStatus').textContent = 'Could not save confirmation. Please try again.';
+      }
+      entry.busy = false;
+      renderTripHistory();
+    }
+
+    function toggleTripHistory(force) {
+      const container = document.getElementById('tripHistory');
+      const expanded = force === undefined ? !container.classList.contains('open') : force;
+      container.classList.toggle('open', expanded);
+      document.getElementById('tripHistoryPill').setAttribute('aria-expanded', String(expanded));
+      document.getElementById('tripHistoryPanel').inert = !expanded;
+      if (!expanded) document.getElementById('tripHistoryPill').focus();
+    }
+
+    function renderTripHistory() {
+      const money = delta => `${delta > 0 ? '+' : delta < 0 ? '−' : ''}$${Math.abs(delta).toFixed(2)}`;
+      const color = delta => delta > 0 ? 'amount-red' : delta < 0 ? 'amount-green' : '';
+      const total = tripScans.reduce((sum, item) => sum + Math.round((item.delta || 0) * 100), 0) / 100;
+      const pending = tripScans.filter(item => item.status === 'confirmation').length;
+      const pill = document.getElementById('tripHistoryPill');
+      pill.textContent = (total ? `${money(total)} this trip` : 'Prices this trip · no change') + (pending ? ` · ${pending} to review` : '');
+      pill.className = color(total);
+      const rows = document.getElementById('tripHistoryRows');
+      rows.replaceChildren();
+      if (!tripScans.length) rows.textContent = 'Scan a price tag to start.';
+      for (const entry of tripScans) {
+        const row = document.createElement('div');
+        row.className = 'trip-history-row';
+        const title = document.createElement('div');
+        title.textContent = `${entry.name || 'Unread name'}${entry.itemNumber ? ` · #${entry.itemNumber}` : ''}`;
+        row.append(title);
+        const detail = document.createElement('div');
+        detail.className = color(entry.delta);
+        detail.textContent = entry.delta !== null ? money(entry.delta) : {
+          new: 'First recorded price', confirmation: `Was “${entry.previousName}”. Same product or reassigned number?`,
+          unavailable: 'History unavailable', incomplete: 'No comparison: item number, name or price unread'
+        }[entry.status];
+        row.append(detail);
+        if (entry.status === 'confirmation') for (const [decision, label] of [['same', 'Same product'], ['new', 'New product']]) {
+          const button = document.createElement('button');
+          button.type = 'button'; button.textContent = label; button.disabled = !!entry.busy;
+          button.onclick = () => confirmPriceProduct(entry, decision);
+          row.append(button);
+        }
+        rows.append(row);
+      }
+    }
+
+    async function initializePriceHistory() {
+      renderTripHistory();
+      document.getElementById('tripHistory').addEventListener('keydown', event => {
+        if (event.key === 'Escape') toggleTripHistory(false);
+      });
+      try {
+        const protectedStorage = await navigator.storage?.persist?.();
+        document.getElementById('historyStorageStatus').textContent = protectedStorage
+          ? 'Price history saved on this device.' : 'Price history saved on this device; browser cleanup may remove it.';
+      } catch { document.getElementById('historyStorageStatus').textContent = 'Protected storage is unavailable; history uses ordinary device storage.'; }
+      try { await openPriceHistory(); }
+      catch { document.getElementById('historyStorageStatus').textContent = 'Price history storage is unavailable on this device.'; }
+    }
+    // TRIP ARCHIVE LOGIC START
+    function buildArchivedTrip({ tripId, date, items }) {
+      if (!items.length) return null;
+      const snapshot = items.map(item => ({
+        name: item.name, itemNumber: item.itemNumber || null, price: item.unitPrice,
+        quantity: item.quantity, delta: Number.isFinite(item.delta) ? item.delta : null
+      }));
+      return { tripId, date, items: snapshot,
+        totalDrift: snapshot.reduce((sum, item) => sum + Math.round((item.delta || 0) * 100) * item.quantity, 0) / 100 };
+    }
+    function orderArchivedTrips(records) {
+      return [...records].sort((a, b) => Date.parse(b.date) - Date.parse(a.date) || b.tripId.localeCompare(a.tripId));
+    }
+    async function archiveTrip(store, input) {
+      const record = buildArchivedTrip(input);
+      if (record) await store.put(record);
+      return record;
+    }
+    async function readArchivedTrips(store) {
+      return orderArchivedTrips(await store.getAll());
+    }
+    // TRIP ARCHIVE LOGIC END
+
+    const archivedTripStore = {
+      async put(record) {
+        const db = await openPriceHistory();
+        return new Promise((resolve, reject) => {
+          const transaction = db.transaction('trips', 'readwrite');
+          transaction.objectStore('trips').put(record);
+          transaction.oncomplete = () => resolve();
+          transaction.onabort = () => reject(transaction.error || new Error('Trip archive aborted'));
+        });
+      },
+      async getAll() {
+        const db = await openPriceHistory();
+        return new Promise((resolve, reject) => {
+          const transaction = db.transaction('trips', 'readonly');
+          const request = transaction.objectStore('trips').getAll();
+          transaction.oncomplete = () => resolve(request.result);
+          transaction.onabort = () => reject(transaction.error || new Error('Trip history unavailable'));
+        });
+      }
+    };
+    const linkedArchiveScans = new WeakSet();
+    const workingArchiveScans = new Map();
+    function metadataForPurchasedItem(name, price) {
+      const scan = tripScans[tripScans.length - 1];
+      // Only attach the latest, unused matching scan; manual/legacy items remain unknown.
+      if (!scan || linkedArchiveScans.has(scan) || scan.name.trim() !== name) return {};
+      linkedArchiveScans.add(scan);
+      const archiveScanId = crypto.randomUUID();
+      workingArchiveScans.set(archiveScanId, scan);
+      const priorPrice = Number.isFinite(scan.delta) ? Math.round((scan.price - scan.delta) * 100) / 100 : null;
+      return { itemNumber: scan.itemNumber || null, archiveScanId, priorPrice,
+        delta: priorPrice === null ? null : (Math.round(price * 100) - Math.round(priorPrice * 100)) / 100 };
+    }
+    let finishingTrip = false;
+    async function finishTrip() {
+      if (finishingTrip) return;
+      const status = document.getElementById('tripArchiveStatus');
+      if (!state.items.length) { status.textContent = 'Nothing to finish. Add items first.'; return; }
+      if (document.getElementById('scanButton').disabled) { status.textContent = 'Wait for the current scan to finish.'; return; }
+      finishingTrip = true;
+      // Freeze editing until the transaction commits so the saved snapshot matches the cleared list.
+      const surfaces = [...document.querySelectorAll('.top-bar, .budget-scroll, .item-list, .footer')];
+      surfaces.forEach(element => { element.inert = true; });
+      status.textContent = 'Saving trip…';
+      let archived = false;
+      try {
+        const items = state.items.map(item => {
+          const scan = workingArchiveScans.get(item.archiveScanId);
+          const prior = scan && Number.isFinite(scan.delta) ? Math.round((scan.price - scan.delta) * 100) / 100 : item.priorPrice;
+          return { ...item, delta: Number.isFinite(prior) ? (Math.round(item.unitPrice * 100) - Math.round(prior * 100)) / 100 : item.delta };
+        });
+        // Persist a retry key before archiving; a failed cleanup cannot create a duplicate on retry.
+        const signature = JSON.stringify(items);
+        if (state.pendingTripArchive?.signature !== signature) {
+          state.pendingTripArchive = { signature, tripId: crypto.randomUUID(), date: new Date().toISOString() };
+          saveData();
+        }
+        await archiveTrip(archivedTripStore, { ...state.pendingTripArchive, items });
+        archived = true;
+        const previousItems = state.items;
+        const pending = state.pendingTripArchive;
+        state.items = [];
+        delete state.pendingTripArchive;
+        try { saveData(); }
+        catch (error) { state.items = previousItems; state.pendingTripArchive = pending; render(); throw error; }
+        workingArchiveScans.clear();
+        status.textContent = 'Trip saved. View it in Past trips.';
+      } catch {
+        status.textContent = archived ? 'Trip saved, but the working list could not be cleared. Retry Finish Trip to complete it.'
+          : 'Could not archive the trip. Your items are still here. Retry; if another tab is open, close it first.';
+      } finally {
+        finishingTrip = false;
+        surfaces.forEach(element => { element.inert = false; });
+        document.getElementById('finishTripButton').focus();
+      }
+    }
+
+    async function showArchivedTrips() {
+      const dialog = document.getElementById('archivedTripsDialog');
+      const list = document.getElementById('archivedTripsList');
+      if (!dialog.open) dialog.showModal();
+      list.textContent = 'Loading trips…';
+      const money = delta => `${delta > 0 ? '+' : delta < 0 ? '−' : ''}$${Math.abs(delta).toFixed(2)}`;
+      const color = delta => delta > 0 ? 'amount-red' : delta < 0 ? 'amount-green' : '';
+      try {
+        const trips = await readArchivedTrips(archivedTripStore);
+        list.replaceChildren();
+        if (!trips.length) list.textContent = 'No finished trips yet.';
+        for (const trip of trips) {
+          const button = document.createElement('button');
+          button.type = 'button'; button.className = 'archive-toggle';
+          button.setAttribute('aria-expanded', 'false');
+          const date = document.createElement('span');
+          date.textContent = new Date(trip.date).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+          const drift = document.createElement('span');
+          drift.textContent = money(trip.totalDrift); drift.className = color(trip.totalDrift);
+          button.append(date, drift);
+          const details = document.createElement('div');
+          details.className = 'archive-details'; details.inert = true;
+          details.id = `archived-trip-${trip.tripId}`;
+          details.setAttribute('aria-hidden', 'true');
+          button.setAttribute('aria-controls', details.id);
+          const content = document.createElement('div');
+          for (const item of trip.items) {
+            const row = document.createElement('div'); row.className = 'trip-history-row';
+            const name = document.createElement('div');
+            name.textContent = `${item.name}${item.itemNumber ? ` · #${item.itemNumber}` : ''} · ${item.quantity} × $${item.price.toFixed(2)}`;
+            const delta = document.createElement('div'); delta.className = color(item.delta);
+            delta.textContent = item.delta === null ? 'No prior confirmed comparison' : `${money(item.delta)} per unit`;
+            row.append(name, delta); content.append(row);
+          }
+          details.append(content);
+          button.onclick = () => {
+            const expanded = details.classList.toggle('open');
+            button.setAttribute('aria-expanded', String(expanded));
+            details.inert = !expanded; details.setAttribute('aria-hidden', String(!expanded));
+          };
+          list.append(button, details);
+        }
+      } catch { list.textContent = 'Could not load past trips. Close this view and try again; close other app tabs if needed.'; }
+    }
+
     // STATE MANAGEMENT
     let state = {
       tripName: "Grocery Run",
@@ -532,6 +887,7 @@
           id: Date.now().toString(),
           name,
           unitPrice: price,
+          ...metadataForPurchasedItem(name, price),
           quantity: 1,
           profileId: state.selectedProfileId
         });
@@ -581,7 +937,7 @@
         original.getContext('2d').drawImage(bitmap, 0, 0);
         bitmap.close();
         const worker = await Tesseract.createWorker('eng');
-        let itemName = '', sellPrice = '';
+        let itemName = '', sellPrice = '', itemNumber = '';
         try {
           const read = async (input, mode = '6', digits = false) => {
             await worker.setParameters({
@@ -687,6 +1043,10 @@
 
           // Compare full-tag and focused-name OCR, retaining the clearest reading per row.
           const full = await read(tag);
+          // Capture the printed header separately; keep all existing name filtering.
+          itemNumber = (full.words || []).filter(word => /^\d{4,7}$/.test(word.text.trim()) &&
+            word.bbox.y0 < tag.height * 0.22 && word.confidence > 45)
+            .sort((a, b) => b.confidence - a.confidence)[0]?.text.trim() || '';
           const focusedTop = Math.round(tag.height * 0.16);
           const focused = await read(crop(tag, 0, focusedTop, tag.width, Math.round(tag.height * 0.34), 1200));
           const ignore = /\b(?:PRICE|SELL|INSTANT|SAVINGS|REBATE|EXP|LIMIT)\b/i;
@@ -806,6 +1166,7 @@
           ? 'Price tag scanned. Review the details, then add the item.'
           : 'Text scanned. Add or correct the price before adding the item.';
         validateInput();
+        await trackPriceScan({ itemNumber, name: itemName, price: sellPrice ? Number(sellPrice) : null });
       } catch (error) {
         console.error('Price tag scan failed:', error);
         scanStatus.textContent = 'Could not read that photo. Please try another image.';
@@ -848,6 +1209,7 @@
 
     // INITIALIZATION & SERVICE WORKER (OFFLINE SUPPORT)
     loadData();
+    initializePriceHistory();
 
     if ('serviceWorker' in navigator) {
       const swCode = `

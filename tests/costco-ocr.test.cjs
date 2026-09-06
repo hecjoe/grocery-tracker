@@ -24,6 +24,7 @@ fs.writeFileSync(path.join(results, 'processScan.js'), source);
 for (const fixture of expected) {
   test(fixture.file, { timeout: 180000 }, async () => {
     const scans = [];
+    const historyScans = [];
     const elements = Object.fromEntries(
       ['scanButton', 'scanStatus', 'newItemName', 'newItemPrice'].map(id => [id, { value: '' }])
     );
@@ -39,6 +40,12 @@ for (const fixture of expected) {
         createElement: tag => { assert.equal(tag, 'canvas'); return createCanvas(1, 1); }
       },
       validateInput() {},
+      trackPriceScan(scan) {
+        historyScans.push(scan);
+        assert.equal(typeof scan.itemNumber, 'string');
+        assert.equal(scan.name, fixture.name);
+        assert.equal(scan.price, Number(fixture.price));
+      },
       console: { error: (...args) => errors.push(args.map(String).join(' ')) },
       Tesseract: {
         ...Tesseract,
@@ -70,6 +77,17 @@ for (const fixture of expected) {
     console.log(`${fixture.file}: ${JSON.stringify(actual)}`);
     try {
       assert.deepEqual(errors, []);
+      assert.equal(historyScans.length, 1, 'each OCR scan reaches price history');
+      const knownNumbers = {
+        '635254874259005563_fdaa4629e7.webp': '706674',
+        'asterisks-on-price-tags-mean-you-probably-wont-see-them-again-1697040470.jpg': '1186666',
+        'costco-price.jpg': '1111161',
+        'if-the-price-ends-in-97-youre-getting-a-solid-discount-1697040470.jpg': '1312504',
+        'images.jpg': '1736133',
+        'l-intro-1749651121.jpg': '1239519',
+        'topur3eeqf2c1.jpg': '1715914'
+      };
+      if (knownNumbers[fixture.file]) assert.equal(historyScans[0].itemNumber, knownNumbers[fixture.file]);
       assert.deepEqual(actual, { name: fixture.name, price: fixture.price });
       assert.equal(elements.scanButton.disabled, false);
       assert.equal(event.target.value, '');

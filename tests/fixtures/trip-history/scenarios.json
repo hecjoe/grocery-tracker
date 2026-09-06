@@ -1,0 +1,22 @@
+{
+  "trip": {
+    "tripId": "trip-one",
+    "date": "2026-09-01T18:00:00.000Z",
+    "items": [
+      { "id": "1", "name": "Organic Milk", "itemNumber": "1234567", "unitPrice": 6.99, "quantity": 2, "delta": 1.5 },
+      { "id": "2", "name": "Whole Wheat Bread", "itemNumber": "2345678", "unitPrice": 4.99, "quantity": 1, "delta": 0 },
+      { "id": "3", "name": "Fresh Blueberries", "itemNumber": "3456789", "unitPrice": 3.99, "quantity": 1, "delta": null }
+    ],
+    "expected": {
+      "tripId": "trip-one", "date": "2026-09-01T18:00:00.000Z",
+      "items": [
+        { "name": "Organic Milk", "itemNumber": "1234567", "price": 6.99, "quantity": 2, "delta": 1.5 },
+        { "name": "Whole Wheat Bread", "itemNumber": "2345678", "price": 4.99, "quantity": 1, "delta": 0 },
+        { "name": "Fresh Blueberries", "itemNumber": "3456789", "price": 3.99, "quantity": 1, "delta": null }
+      ],
+      "totalDrift": 3
+    }
+  },
+  "empty": { "tripId": "empty", "date": "2026-09-02T18:00:00.000Z", "items": [], "expected": null },
+  "later": { "tripId": "trip-two", "date": "2026-09-03T18:00:00.000Z", "items": [{ "name": "Organic Milk", "itemNumber": "1234567", "unitPrice": 5.99, "quantity": 1, "delta": -1 }] }
+}

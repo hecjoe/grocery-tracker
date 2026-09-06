@@ -1,0 +1,7 @@
+[
+  { "case": "unchanged", "stored": { "itemNumber": "1234567", "name": "Organic Whole Milk", "history": [{ "date": "2026-08-01T00:00:00Z", "price": 5.49 }] }, "scan": { "itemNumber": "1234567", "name": "ORGANIC WHOLE MILK", "price": 5.49 }, "expected": { "status": "unchanged", "delta": 0 } },
+  { "case": "increased", "stored": { "itemNumber": "1234567", "name": "Organic Whole Milk", "history": [{ "date": "2026-07-01T00:00:00Z", "price": 4.49 }, { "date": "2026-08-01T00:00:00Z", "price": 5.49 }] }, "scan": { "itemNumber": "1234567", "name": "Organic Whole Milk 2 pack", "price": 6.99 }, "expected": { "status": "increased", "delta": 2 } },
+  { "case": "decreased", "stored": { "itemNumber": "1234567", "name": "Organic Whole Milk", "history": [{ "date": "2026-08-01T00:00:00Z", "price": 5.49 }] }, "scan": { "itemNumber": "1234567", "name": "Organic Whole Milk", "price": 4.99 }, "expected": { "status": "decreased", "delta": -0.5 } },
+  { "case": "new item", "stored": null, "scan": { "itemNumber": "7654321", "name": "Fresh Blueberries", "price": 3.99 }, "expected": { "status": "new", "delta": null } },
+  { "case": "reassigned number", "stored": { "itemNumber": "1234567", "name": "Organic Whole Milk", "history": [{ "date": "2026-08-01T00:00:00Z", "price": 5.49 }] }, "scan": { "itemNumber": "1234567", "name": "Cotton Bath Towels", "price": 19.99 }, "expected": { "status": "confirmation", "delta": null } }
+]

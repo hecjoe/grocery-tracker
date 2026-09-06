@@ -1,0 +1,9 @@
+[
+  { "case": "ignore one outlier spike", "history": [12.99, 12.99, 15.99], "price": 12.99, "expected": { "status": "unchanged", "delta": 0 } },
+  { "case": "repeated new price becomes baseline", "history": [12.99, 15.99, 15.99], "price": 15.99, "expected": { "status": "unchanged", "delta": 0 } },
+  { "case": "single prior entry", "history": [12.99], "price": 15.99, "expected": { "status": "increased", "delta": 3 } },
+  { "case": "empty history", "history": [], "price": 15.99, "expected": { "status": "new", "delta": null } },
+  { "case": "first jump from stable baseline", "history": [12.99, 12.99, 12.99], "price": 15.99, "expected": { "status": "increased", "delta": 3 } },
+  { "case": "two prior entries exclude current scan", "history": [12.99, 12.99], "price": 15.99, "expected": { "status": "increased", "delta": 3 } },
+  { "case": "two unequal entries use their midpoint", "history": [10, 14], "price": 20, "expected": { "status": "increased", "delta": 8 } }
+]
