@@ -570,12 +570,237 @@
       scanStatus.textContent = 'Reading price tag…';
 
       try {
-        const { data: { text } } = await Tesseract.recognize(image, 'eng');
-        const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-        const priceMatch = text.match(/\b\d+\.\d{2}\b/);
+        const bitmap = await createImageBitmap(image);
+        const canvas = (width, height) => {
+          const result = document.createElement('canvas');
+          result.width = width;
+          result.height = height;
+          return result;
+        };
+        const original = canvas(bitmap.width, bitmap.height);
+        original.getContext('2d').drawImage(bitmap, 0, 0);
+        bitmap.close();
+        const worker = await Tesseract.createWorker('eng');
+        let itemName = '', sellPrice = '';
+        try {
+          const read = async (input, mode = '6', digits = false) => {
+            await worker.setParameters({
+              tessedit_pageseg_mode: mode,
+              tessedit_char_whitelist: digits ? '0123456789.' : '',
+              user_defined_dpi: '300'
+            });
+            return (await worker.recognize(input.toDataURL('image/png'))).data;
+          };
+          const raw = await read(original, '11');
+          const block = await read(original);
+          const anchor = [...raw.words, ...block.words]
+            .filter(word => /^\d{4,7}$/.test(word.text.trim()) && word.confidence > 45)
+            .sort((a, b) => b.confidence - a.confidence)[0];
 
-        if (lines[0]) nameInput.value = lines[0];
-        if (priceMatch) priceInput.value = priceMatch[0];
+          // Locate the pale paper, removing narrow bridges to shelves/packaging.
+          const width = 500, scale = width / original.width;
+          const height = Math.round(original.height * scale);
+          const preview = canvas(width, height);
+          preview.getContext('2d').drawImage(original, 0, 0, width, height);
+          const rgba = preview.getContext('2d').getImageData(0, 0, width, height).data;
+          const components = (mask, w, h) => {
+            const seen = new Uint8Array(w * h), result = [];
+            for (let i = 0; i < mask.length; i++) {
+              if (seen[i] || !mask[i]) continue;
+              const pixels = [i];
+              seen[i] = 1;
+              let x0 = i % w, x1 = x0, y0 = Math.floor(i / w), y1 = y0;
+              for (let k = 0; k < pixels.length; k++) {
+                const at = pixels[k], x = at % w, y = Math.floor(at / w);
+                x0 = Math.min(x0, x); x1 = Math.max(x1, x);
+                y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+                for (const next of [x > 0 ? at - 1 : -1, x < w - 1 ? at + 1 : -1, at - w, at + w]) {
+                  if (next >= 0 && next < mask.length && !seen[next] && mask[next]) {
+                    seen[next] = 1;
+                    pixels.push(next);
+                  }
+                }
+              }
+              result.push({ pixels, x0, x1, y0, y1, height: y1 - y0 + 1 });
+            }
+            return result;
+          };
+          const paper = (minimum, left = 0) => {
+            const mask = new Uint8Array(width * height), eroded = new Uint8Array(mask.length);
+            for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+              const i = (y * width + x) * 4;
+              const low = Math.min(rgba[i], rgba[i + 1], rgba[i + 2]);
+              const high = Math.max(rgba[i], rgba[i + 1], rgba[i + 2]);
+              mask[y * width + x] = x >= left && low >= minimum && high - low <= 55 ? 1 : 0;
+            }
+            for (let y = 3; y < height - 3; y++) for (let x = 3; x < width - 3; x++) {
+              let solid = 1;
+              for (let dy = -3; dy <= 3 && solid; dy++) for (let dx = -3; dx <= 3; dx++) {
+                if (!mask[(y + dy) * width + x + dx]) { solid = 0; break; }
+              }
+              eroded[y * width + x] = solid;
+            }
+            const region = components(eroded, width, height).sort((a, b) => b.pixels.length - a.pixels.length)[0];
+            if (!region || region.pixels.length < width * height * 0.04) return null;
+            const corners = [], extrema = [Infinity, -Infinity, -Infinity, Infinity];
+            for (const i of region.pixels) {
+              const x = i % width, y = Math.floor(i / width), values = [x + y, x - y, x + y, x - y];
+              for (let k = 0; k < 4; k++) {
+                if (k === 0 || k === 3 ? values[k] < extrema[k] : values[k] > extrema[k]) {
+                  extrema[k] = values[k]; corners[k] = [x, y];
+                }
+              }
+            }
+            return corners;
+          };
+          let corners = paper(95);
+          if (corners?.some(([x, y]) => x <= 3 || y <= 3 || x >= width - 4 || y >= height - 4)) {
+            const left = anchor ? Math.max(0, (anchor.bbox.x0 - 1.5 * (anchor.bbox.y1 - anchor.bbox.y0)) * scale) : 0;
+            corners = paper(130, left) || corners;
+          }
+          let tag = original;
+          if (corners) {
+            const [tl, tr, br, bl] = corners;
+            const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+            const w = 1600, h = Math.round(w * (distance(tl, bl) + distance(tr, br)) / (distance(tl, tr) + distance(bl, br)));
+            if (h > 200 && h < 2400) {
+              tag = canvas(w, h);
+              const ctx = tag.getContext('2d'), target = ctx.createImageData(w, h);
+              const source = original.getContext('2d').getImageData(0, 0, original.width, original.height).data;
+              // Resample the detected quadrilateral to align the printed rows.
+              for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+                const u = x / (w - 1), v = y / (h - 1);
+                const sx = Math.min(original.width - 1, Math.max(0, Math.round(((1 - v) * ((1 - u) * tl[0] + u * tr[0]) + v * ((1 - u) * bl[0] + u * br[0])) / scale)));
+                const sy = Math.min(original.height - 1, Math.max(0, Math.round(((1 - v) * ((1 - u) * tl[1] + u * tr[1]) + v * ((1 - u) * bl[1] + u * br[1])) / scale)));
+                const from = (sy * original.width + sx) * 4, to = (y * w + x) * 4;
+                for (let c = 0; c < 3; c++) target.data[to + c] = source[from + c];
+                target.data[to + 3] = 255;
+              }
+              ctx.putImageData(target, 0, 0);
+            }
+          }
+          const crop = (input, x, y, w, h, outputWidth) => {
+            const result = canvas(outputWidth, Math.max(1, Math.round(outputWidth * h / w)));
+            result.getContext('2d').drawImage(input, x, y, w, h, 0, 0, result.width, result.height);
+            return result;
+          };
+
+          // Compare full-tag and focused-name OCR, retaining the clearest reading per row.
+          const full = await read(tag);
+          const focusedTop = Math.round(tag.height * 0.16);
+          const focused = await read(crop(tag, 0, focusedTop, tag.width, Math.round(tag.height * 0.34), 1200));
+          const ignore = /\b(?:PRICE|SELL|INSTANT|SAVINGS|REBATE|EXP|LIMIT)\b/i;
+          const cleanName = value => value.replace(/(?:^|\s)[|~:!%]+(?=\s|$)/g, ' ')
+            .replace(/\b0Z\b/g, 'OZ').replace(/\s+/g, ' ').trim();
+          const rows = [];
+          for (const line of full.lines || []) {
+            const words = line.words.filter(word => /[A-Z0-9]/.test(word.text) &&
+              !/[a-z]/.test(word.text) && (word.bbox.y1 - word.bbox.y0) >= tag.width * 0.022);
+            if (!words.length || words.some(word => /^\d{4,}$/.test(word.text.trim()))) continue;
+            const y = Math.min(...words.map(word => word.bbox.y0));
+            const text = words.map(word => word.text.trim()).join(' ');
+            if (!/[A-Z]{2}/.test(text) || ignore.test(text) || y < tag.height * 0.12 || y > tag.height * 0.46) continue;
+            rows.push({ y, words, text });
+          }
+          rows.sort((a, b) => a.y - b.y);
+          const selectedRows = rows.slice(0, 3), names = [];
+          for (let i = 0; i < selectedRows.length; i++) {
+            const row = selectedRows[i];
+            const heights = row.words.map(word => word.bbox.y1 - word.bbox.y0).sort((a, b) => a - b);
+            const next = selectedRows[i + 1], previous = selectedRows[i - 1];
+            const spacing = next ? next.y - row.y : previous ? row.y - previous.y : heights[0] * 1.4;
+            let y = row.y;
+            // A clipped item number can enlarge the first name word's box.
+            if (i === 0 && selectedRows.length === 3) {
+              const gap = selectedRows[2].y - selectedRows[1].y;
+              if (Math.abs(spacing - gap) > gap * 0.2) y = selectedRows[1].y - gap;
+            }
+            const fontHeight = Math.min(heights[0], spacing * 0.8);
+            const top = Math.max(0, Math.round(y - 4));
+            const input = crop(tag, tag.width * 0.02, top, tag.width * 0.94, Math.round(fontHeight + 10), 1200);
+            const data = await read(input, '7');
+            const candidates = [];
+            for (const [result, factor, ox, oy] of [
+              [full, 1, 0, 0],
+              [focused, tag.width / 1200, 0, focusedTop],
+              [data, tag.width * 0.94 / 1200, tag.width * 0.02, top]
+            ]) {
+              for (const word of result.words) {
+                const value = word.text.trim(), box = word.bbox;
+                const x0 = box.x0 * factor + ox, x1 = box.x1 * factor + ox;
+                const y0 = box.y0 * factor + oy, wh = (box.y1 - box.y0) * factor;
+                if (word.confidence < 40 || !/[A-Z0-9&/]/.test(value) || /[a-z]/.test(value) ||
+                    /^\d{4,}$/.test(value) || wh < fontHeight * 0.55 ||
+                    Math.abs(y0 - y) > fontHeight * 0.65) continue;
+                candidates.push({ text: value, x0, x1, confidence: word.confidence });
+              }
+            }
+            // Keep a confidently read compound word instead of a slightly more
+            // confident fragment occupying only part of the same printed word.
+            for (const word of candidates) {
+              word.score = word.confidence + (word.confidence >= 85 && candidates.some(other =>
+                other.text.length < word.text.length && word.text.includes(other.text) &&
+                other.confidence <= word.confidence + 5 &&
+                Math.min(word.x1, other.x1) - Math.max(word.x0, other.x0) > (other.x1 - other.x0) * 0.8
+              ) ? 5 : 0);
+            }
+            candidates.sort((a, b) => b.score - a.score);
+            const chosen = [];
+            for (const word of candidates) {
+              if (chosen.some(other => Math.min(word.x1, other.x1) - Math.max(word.x0, other.x0) >
+                  Math.min(word.x1 - word.x0, other.x1 - other.x0) * 0.3)) continue;
+              chosen.push(word);
+            }
+            let text = cleanName(chosen.sort((a, b) => a.x0 - b.x0).map(word => word.text).join(' '));
+            if (!/[A-Z]{2}/.test(text) || ignore.test(text)) text = cleanName(row.text);
+            text = text.replace(/[!:~]+$/g, '').trim();
+            if ((text.match(/"/g) || []).length === 1 && !/\d"/.test(text)) text = text.replace(/"/g, '');
+            names.push(text);
+          }
+          itemName = names.join(' ');
+
+          // Find the tallest connected printed digits in the lower half of the tag.
+          // Read their entire band as one number so separated cents stay attached.
+          const small = crop(tag, 0, 0, tag.width, tag.height, 800);
+          const w = small.width, h = small.height;
+          const pixels = small.getContext('2d').getImageData(0, 0, w, h).data;
+          const gray = new Uint8Array(w * h);
+          for (let i = 0; i < gray.length; i++) gray[i] = Math.round(0.299 * pixels[i * 4] + 0.587 * pixels[i * 4 + 1] + 0.114 * pixels[i * 4 + 2]);
+          const prices = [];
+          for (const threshold of [100, 140]) {
+            const mask = new Uint8Array(w * h);
+            for (let y = Math.ceil(h * 0.45); y < h * 0.98; y++) for (let x = Math.ceil(w * 0.05); x < w * 0.98; x++) {
+              mask[y * w + x] = gray[y * w + x] <= threshold ? 1 : 0;
+            }
+            const glyphs = components(mask, w, h).filter(b => b.height > h * 0.04 && b.height < h * 0.5 && b.x1 - b.x0 < w * 0.45 && b.pixels.length > 30)
+              .sort((a, b) => b.height - a.height);
+            const largest = glyphs[0];
+            if (!largest) continue;
+            const group = glyphs.filter(b => b.height >= largest.height * 0.55 && Math.abs((b.y0 + b.y1) - (largest.y0 + largest.y1)) < largest.height * 0.8);
+            const x0 = Math.max(0, Math.min(...group.map(b => b.x0)) - 8), y0 = Math.max(0, Math.min(...group.map(b => b.y0)) - 8);
+            const bw = Math.min(w - x0, Math.max(...group.map(b => b.x1)) - x0 + 9), bh = Math.min(h - y0, Math.max(...group.map(b => b.y1)) - y0 + 9);
+            const binary = canvas(bw + 40, bh + 40), ctx = binary.getContext('2d');
+            ctx.fillStyle = 'white'; ctx.fillRect(0, 0, binary.width, binary.height);
+            const ink = ctx.createImageData(bw, bh);
+            for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+              const at = (y * bw + x) * 4, value = gray[(y + y0) * w + x + x0] <= threshold ? 0 : 255;
+              ink.data[at] = ink.data[at + 1] = ink.data[at + 2] = value; ink.data[at + 3] = 255;
+            }
+            ctx.putImageData(ink, 20, 20);
+            const data = await read(crop(binary, 0, 0, binary.width, binary.height, 600), '8', true);
+            for (const word of data.words) {
+              const value = word.text.trim();
+              if (/^\d{1,4}\.\d{2}$/.test(value)) prices.push({ value, height: largest.height, confidence: word.confidence });
+            }
+          }
+          prices.sort((a, b) => b.height - a.height || b.confidence - a.confidence);
+          sellPrice = prices[0]?.value || '';
+        } finally {
+          await worker.terminate();
+        }
+        const priceMatch = sellPrice;
+        if (itemName) nameInput.value = itemName;
+        if (sellPrice) priceInput.value = sellPrice;
 
         scanStatus.textContent = priceMatch
           ? 'Price tag scanned. Review the details, then add the item.'
