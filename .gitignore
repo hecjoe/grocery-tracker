@@ -1,1 +1,4 @@
-tests/fixtures/
+.tools/
+node_modules/
+tests/.cache/
+tests/results/
