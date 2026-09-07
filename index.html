@@ -233,6 +233,12 @@
 
     .input-name { flex: 1; }
     .input-price { width: 175px; }
+    .manual-entry { display: grid; grid-template-columns: minmax(0, 1fr) 110px 110px; }
+    .manual-entry input { min-width: 0; width: 100%; padding: 10px 12px; }
+    @media (max-width: 480px) {
+      .manual-entry { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .manual-entry .input-name { grid-column: 1 / -1; }
+    }
 
     .segmented-picker {
       display: flex;
@@ -356,9 +362,10 @@
 
   <!-- STICKY FOOTER -->
   <div class="footer">
-    <div class="input-group">
+    <div class="input-group manual-entry">
       <input type="text" id="newItemName" class="input-name" placeholder="Item Name" oninput="validateInput()" onkeydown="handleItemNameKeydown(event)">
-      <input type="number" step="0.01" id="newItemPrice" class="input-price" placeholder="Price" oninput="validateInput()" onkeydown="handleItemPriceKeydown(event)">
+      <input type="number" inputmode="decimal" step="0.01" id="newItemPrice" class="input-price" placeholder="Price" oninput="validateInput()" onkeydown="handleItemPriceKeydown(event)">
+      <input type="text" inputmode="numeric" id="newItemNumber" class="input-item-number" placeholder="Item #" aria-label="Item number (optional)" onkeydown="handleItemPriceKeydown(event)">
     </div>
     <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden onchange="processScan(event)">
     
@@ -434,13 +441,23 @@
       return historyDatabase;
     }
 
+    // MANUAL HISTORY INPUT START
+    function manualHistoryInput(rawNumber, name, price) {
+      const typed = rawNumber.trim();
+      const itemNumber = /^\d{4,7}$/.test(typed) ? typed : '';
+      return { itemNumber, name: name.trim(), price,
+        historyKey: itemNumber || `name:${name.trim().replace(/\s+/g, ' ').toUpperCase()}` };
+    }
+    // MANUAL HISTORY INPUT END
+
     async function savePriceScan(scan, decision, showComparison = () => {}) {
       const db = await openPriceHistory();
       return new Promise((resolve, reject) => {
         const transaction = db.transaction(['items', 'reassignedItems'], 'readwrite');
         const items = transaction.objectStore('items');
         let result;
-        const request = items.get(scan.itemNumber);
+        const historyKey = scan.itemNumber || scan.historyKey;
+        const request = items.get(historyKey);
         request.onsuccess = () => {
           let stored = request.result;
           result = comparePriceHistory(stored, scan);
@@ -457,7 +474,7 @@
           }
           // Publish the pre-scan comparison before appending, within the same transaction.
           showComparison(result);
-          items.put({ itemNumber: scan.itemNumber, name: scan.name,
+          items.put({ itemNumber: historyKey, name: scan.name,
             history: [...(stored?.history || []), { date: scan.date, price: scan.price }] });
         };
         transaction.oncomplete = () => resolve(result);
@@ -469,7 +486,7 @@
     async function trackPriceScan(scan) {
       const entry = { ...scan, date: new Date().toISOString(), status: 'unavailable', delta: null };
       tripScans.push(entry);
-      if (!scan.itemNumber || !scan.name || scan.price === null || !Number.isFinite(scan.price)) {
+      if ((!scan.itemNumber && !scan.historyKey) || !scan.name || scan.price === null || !Number.isFinite(scan.price)) {
         entry.status = 'incomplete';
       } else {
         try { Object.assign(entry, await savePriceScan(entry, undefined, result => {
@@ -524,11 +541,11 @@
         const row = document.createElement('div');
         row.className = 'trip-history-row';
         const title = document.createElement('div');
-        title.textContent = `${entry.name || 'Unread name'}${entry.itemNumber ? ` · #${entry.itemNumber}` : ''}`;
+        title.textContent = `${entry.name || 'Unread name'}${entry.itemNumber ? ` · #${entry.itemNumber}` : ''}${Number.isFinite(entry.price) ? ` · $${entry.price.toFixed(2)}` : ''}`;
         row.append(title);
         const detail = document.createElement('div');
         detail.className = color(entry.delta);
-        detail.textContent = entry.delta !== null ? money(entry.delta) : {
+        detail.textContent = entry.delta !== null ? `${money(entry.delta)} change` : {
           new: 'First recorded price', confirmation: `Was “${entry.previousName}”. Same product or reassigned number?`,
           unavailable: 'History unavailable', incomplete: 'No comparison: item number, name or price unread'
         }[entry.status];
@@ -603,10 +620,11 @@
     const workingArchiveScans = new Map();
     function metadataForPurchasedItem(name, price) {
       const scan = tripScans[tripScans.length - 1];
-      // Only attach the latest, unused matching scan; manual/legacy items remain unknown.
+      // Only attach the latest, unused matching observation; legacy items remain unknown.
       if (!scan || linkedArchiveScans.has(scan) || scan.name.trim() !== name) return {};
       linkedArchiveScans.add(scan);
-      const archiveScanId = crypto.randomUUID();
+      const archiveScanId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       workingArchiveScans.set(archiveScanId, scan);
       const priorPrice = Number.isFinite(scan.delta) ? Math.round((scan.price - scan.delta) * 100) / 100 : null;
       return { itemNumber: scan.itemNumber || null, archiveScanId, priorPrice,
@@ -875,25 +893,59 @@
       saveData();
     }
 
-    function addItem() {
+    let addingItem = false;
+    async function addItem() {
+      const scanButton = document.getElementById('scanButton');
+      if (addingItem || scanButton.disabled) return;
       const nameInput = document.getElementById('newItemName');
       const priceInput = document.getElementById('newItemPrice');
-
+      const numberInput = document.getElementById('newItemNumber');
       const name = nameInput.value.trim();
-      const price = parseFloat(priceInput.value);
+      const rawNumber = numberInput.value.trim();
+      const price = priceInput.value.trim() === '' ? NaN : Number(priceInput.value);
+      if (!name || !Number.isFinite(price) || !state.selectedProfileId) return;
 
-      if (name && !isNaN(price) && state.selectedProfileId) {
-        state.items.push({
-          id: Date.now().toString(),
-          name,
-          unitPrice: price,
-          ...metadataForPurchasedItem(name, price),
-          quantity: 1,
-          profileId: state.selectedProfileId
-        });
+      const item = {
+        id: Date.now().toString(), name, unitPrice: price, quantity: 1,
+        profileId: state.selectedProfileId,
+        itemNumber: /^\d{4,7}$/.test(rawNumber) ? rawNumber : null,
+        delta: null
+      };
+      addingItem = true;
+      scanButton.disabled = true;
+      try {
+        // Commit and render the purchase before starting any history side effects.
+        state.items.push(item);
+        saveData();
+        nameInput.value = priceInput.value = numberInput.value = '';
+        validateInput();
+        try {
+          await updatePurchasedItemHistory(item, rawNumber);
+        } catch {
+          document.getElementById('historyStorageStatus').textContent =
+            'Item added. Price history is unavailable; do not add the item again.';
+        }
+      } finally {
+        addingItem = false;
+        scanButton.disabled = false;
+        validateInput();
+      }
+    }
 
-        nameInput.value = '';
-        priceInput.value = '';
+    async function updatePurchasedItemHistory(item, rawNumber) {
+      // Use captured values, never form fields that have already been cleared.
+      const manual = manualHistoryInput(rawNumber, item.name, item.unitPrice);
+      const latest = tripScans[tripScans.length - 1];
+      const reuseScan = latest && latest.itemNumber && !linkedArchiveScans.has(latest) &&
+        latest.name.trim() === item.name && latest.price === item.unitPrice &&
+        (!rawNumber || manual.itemNumber === latest.itemNumber);
+      if (!reuseScan) await trackPriceScan(manual);
+      if (rawNumber && !manual.itemNumber) {
+        document.getElementById('scanStatus').textContent =
+          'Item # must be 4?7 digits. Used the item name for price history.';
+      }
+      if (state.items.includes(item)) {
+        Object.assign(item, metadataForPurchasedItem(item.name, item.unitPrice));
         saveData();
       }
     }
@@ -1204,11 +1256,15 @@
     function validateInput() {
       const name = document.getElementById('newItemName').value.trim();
       const price = document.getElementById('newItemPrice').value.trim();
-      document.getElementById('addItemBtn').disabled = !(name && price && state.selectedProfileId);
+      document.getElementById('addItemBtn').disabled = addingItem || !(name && price && state.selectedProfileId);
     }
 
     // INITIALIZATION & SERVICE WORKER (OFFLINE SUPPORT)
     loadData();
+    // A newly chosen photo supersedes any number left in the manual entry form.
+    document.getElementById('cameraInput').addEventListener('change', event => {
+      if (event.target.files?.length) document.getElementById('newItemNumber').value = '';
+    }, true);
     initializePriceHistory();
 
     if ('serviceWorker' in navigator) {

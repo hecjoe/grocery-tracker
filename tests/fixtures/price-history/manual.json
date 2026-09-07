@@ -1,0 +1,7 @@
+[
+  { "case": "manual number then OCR shares history", "entries": [{ "origin": "manual", "itemNumber": "1129578", "name": "Organic Milk", "price": 19.99 }, { "origin": "ocr", "itemNumber": "1129578", "name": "ORGANIC MILK", "price": 22.99 }], "key": "1129578", "deltas": [null, 3] },
+  { "case": "manual repeats use rolling median", "entries": [{ "origin": "manual", "itemNumber": "1129578", "name": "Organic Milk", "price": 19.99 }, { "origin": "manual", "itemNumber": "1129578", "name": "Organic Milk", "price": 23.99 }, { "origin": "manual", "itemNumber": "1129578", "name": "Organic Milk", "price": 25.99 }], "key": "1129578", "deltas": [null, 4, 4] },
+  { "case": "blank number falls back to normalized full name", "entries": [{ "origin": "manual", "itemNumber": "", "name": "Organic Milk", "price": 19.99 }, { "origin": "manual", "itemNumber": "", "name": " organic   milk ", "price": 22.99 }], "key": "name:ORGANIC MILK", "deltas": [null, 3] },
+  { "case": "malformed number uses name fallback", "entries": [{ "origin": "manual", "itemNumber": "112A9578", "name": "Organic Milk", "price": 19.99 }, { "origin": "manual", "itemNumber": "123", "name": "Organic Milk", "price": 22.99 }], "key": "name:ORGANIC MILK", "deltas": [null, 3] },
+  { "case": "unseen manual number is new", "entries": [{ "origin": "manual", "itemNumber": "7654321", "name": "Fresh Apples", "price": 5.99 }], "key": "7654321", "deltas": [null] }
+]
