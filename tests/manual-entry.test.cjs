@@ -30,12 +30,12 @@ function harness(options = {}) {
     }; } };
     return tx;
   } };
-  const api = new Function('openPriceHistory', 'tripScans', 'renderTripHistory', 'document', 'state', 'validateInput', 'saveData', 'crypto',
+  const api = new Function('openPriceHistory', 'tripScans', 'renderTripHistory', 'document', 'state', 'validateInput', 'saveData', 'crypto', 'completePlannedItems',
     logic + manual + scans + metadata + addSource + ';return { manualHistoryInput, trackPriceScan, addItem };')(
       async () => { if (options.historyGate) await options.historyGate; return db; }, tripScans,
       () => { if (options.renderError) throw new Error('History UI unavailable'); },
       { getElementById(id) { return elements[id]; } }, state, () => {},
-      () => { renderedItems.splice(0, renderedItems.length, ...structuredClone(state.items)); }, options.crypto || globalThis.crypto);
+      () => { renderedItems.splice(0, renderedItems.length, ...structuredClone(state.items)); }, options.crypto || globalThis.crypto, () => {});
   return { ...api, records, tripScans, state, elements, renderedItems };
 }
 for (const fixture of fixtures) {

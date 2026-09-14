@@ -1,0 +1,9 @@
+[
+  { "case": "add planned Cheese", "action": "add", "name": "Cheese", "completed": false },
+  { "case": "select Cheese prefills without completing", "action": "select", "name": "Cheese", "completed": false },
+  { "case": "purchase Cheese completes plan", "action": "purchase", "name": "Cheese", "completed": true },
+  { "case": "purchase trimmed lowercase cheese completes plan", "action": "purchase", "name": " cheese ", "completed": true },
+  { "case": "unrelated purchase leaves plan alone", "action": "purchase", "name": "Milk", "completed": false },
+  { "case": "confirmed clear removes plans", "action": "clear", "name": "Cheese" },
+  { "case": "reload preserves completed and pending plans", "action": "reload", "name": "Cheese" }
+]

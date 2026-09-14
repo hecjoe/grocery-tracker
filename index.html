@@ -33,17 +33,20 @@
       -webkit-tap-highlight-color: transparent;
     }
 
+    html { height: 100%; overflow: hidden; overscroll-behavior: none; }
     body {
       background-color: var(--bg-color);
       color: var(--text-color);
       display: flex;
       flex-direction: column;
       height: 100vh;
+      height: 100dvh;
       overflow: hidden;
     }
 
     /* TOP BAR */
     .top-bar {
+      flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -83,6 +86,8 @@
 
     /* BUDGET DASHBOARD */
     .budget-scroll {
+      margin: var(--budget-clearance, 0px);
+      flex-shrink: 0;
       display: flex;
       gap: 12px;
       overflow-x: auto;
@@ -92,7 +97,7 @@
 
     .budget-card {
       background-color: var(--card-bg);
-      border-radius: 12px;
+      border-radius: 18px;
       padding: 12px;
       min-width: 120px;
       display: flex;
@@ -128,7 +133,7 @@
       background: var(--card-bg);
       border: 1px dashed var(--border-color);
       color: var(--accent-blue);
-      border-radius: 12px;
+      border-radius: 18px;
       min-width: 80px;
       display: flex;
       flex-direction: column;
@@ -296,6 +301,7 @@
     }
 
     .scan-status {
+      /* Reserve one line so ordinary scan-status updates do not move the footer controls. */
       min-height: 1rem;
       color: var(--text-secondary);
       font-size: 0.75rem;
@@ -304,7 +310,7 @@
     .trip-history { position: fixed; right: 12px; top: 72px; z-index: 20; max-width: calc(100vw - 24px); display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
     .trip-history button, .trip-history-panel { pointer-events: auto; }
     .trip-history button { background: var(--card-bg); color: var(--text-color); border: 1px solid var(--text-secondary); border-radius: 20px; padding: 10px 14px; cursor: pointer; }
-    .trip-history-panel { width: 320px; max-width: calc(100vw - 24px); box-sizing: border-box; background: var(--card-bg); border-radius: 16px; box-shadow: 0 6px 24px #0008; overflow: hidden; max-height: 0; opacity: 0; transform: translateY(-8px); visibility: hidden; transition: max-height .25s ease, opacity .25s ease, transform .25s ease, visibility .25s; }
+    .trip-history-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 21; width: 320px; max-width: calc(100vw - 24px); box-sizing: border-box; background: var(--card-bg); border-radius: 16px; box-shadow: 0 6px 24px #0008; overflow: hidden; max-height: 0; opacity: 0; transform: translateY(-8px); visibility: hidden; transition: max-height .25s ease, opacity .25s ease, transform .25s ease, visibility .25s; }
     .trip-history.open .trip-history-panel { max-height: 55dvh; opacity: 1; transform: translateY(0); visibility: visible; overflow-y: auto; }
     .trip-history-content { padding: 14px; }
     .trip-history-content p { color: var(--text-secondary); font-size: .8rem; }
@@ -314,9 +320,17 @@
     .trip-history .amount-green { color: var(--accent-green); }
     @media (prefers-reduced-motion: reduce) { .trip-history-panel { transition: none; } }
 
+    .floating-tools { position: fixed; top: 72px; right: 12px; z-index: 20; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; overflow: visible; pointer-events: none; }
+    /* Only trigger pills participate in this stack; panels overlay below both pills. */
+    .floating-tools > .trip-history { position: static; flex-shrink: 0; }
+    .shopping-entry { display: flex; gap: 8px; margin: 12px 0; }
+    .shopping-entry input { font-size: 16px; min-width: 0; flex: 1; background: var(--input-bg); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; }
+    .planned-row { margin: 6px 0; }
+    .planned-row button { width: 100%; text-align: left; overflow-wrap: anywhere; }
+    .planned-row.completed button { text-decoration: line-through; color: var(--text-secondary); }
     .archive-actions { display: flex; justify-content: flex-end; gap: 16px; padding: 6px 0; }
     .archive-status { color: var(--text-secondary); font-size: .75rem; text-align: right; }
-    .archive-dialog { margin: auto; width: min(420px, calc(100vw - 24px)); max-height: 75dvh; padding: 18px; background: var(--card-bg); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 16px; overflow-y: auto; }
+    .archive-dialog { position: fixed; inset: 0; margin: auto; width: min(420px, calc(100vw - 24px)); max-height: 75dvh; padding: 18px; background: var(--card-bg); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 16px; overflow-y: auto; }
     .archive-dialog::backdrop { background: #0007; }
     .archive-dialog h3 { margin: 12px 0; }
     .archive-dialog p { color: var(--text-secondary); font-size: .8rem; margin: 8px 0; }
@@ -325,6 +339,9 @@
     .archive-details.open { grid-template-rows: 1fr; opacity: 1; }
     .archive-details > div { min-height: 0; overflow: hidden; }
     @media (prefers-reduced-motion: reduce) { .archive-details { transition: none; } }
+
+    /* Avoid keyboard focus zoom in every editable area, including budget profiles. */
+    .budget-card input, .input-group input, .shopping-entry input { font-size: 16px; }
 
     .spinner {
       display: inline-block;
@@ -389,6 +406,7 @@
     <div id="archivedTripsList" aria-live="polite"></div>
   </dialog>
 
+  <div class="floating-tools" id="floatingTools">
   <aside class="trip-history" id="tripHistory" aria-label="Trip price history">
     <button id="tripHistoryPill" type="button" aria-expanded="false" aria-controls="tripHistoryPanel" onclick="toggleTripHistory()">Prices this trip</button>
     <section class="trip-history-panel" id="tripHistoryPanel" inert>
@@ -402,7 +420,184 @@
     </section>
   </aside>
 
+  <aside class="trip-history" id="shoppingList" aria-label="Shopping list">
+    <button id="shoppingListPill" type="button" aria-expanded="false" aria-controls="shoppingListPanel" onclick="toggleShoppingList()">Shopping List</button>
+    <section class="trip-history-panel" id="shoppingListPanel" inert>
+      <div class="trip-history-content">
+        <button type="button" onclick="toggleShoppingList(false)">Close</button>
+        <h3>Shopping List</h3>
+        <form class="shopping-entry" onsubmit="event.preventDefault(); addPlannedItem(document.getElementById('plannedItemName').value); document.getElementById('plannedItemName').value = '';">
+          <input id="plannedItemName" type="text" placeholder="e.g. Cheese" aria-label="Planned item name" required>
+          <button type="submit">Add</button>
+        </form>
+        <p>Tap an item to fill its name below. It is crossed out after you add it to your trip.</p>
+        <div id="plannedItems"></div>
+        <button type="button" onclick="clearPlannedItems()">Clear list</button>
+        <p id="shoppingListStatus" role="status"></p>
+      </div>
+    </section>
+  </aside>
+  </div>
+
   <script>
+    // SHOPPING LIST LOGIC START
+    let plannedItems = [];
+    function saveShoppingList() {
+      try { localStorage.setItem('grocery_planned_items', JSON.stringify(plannedItems)); }
+      catch { document.getElementById('shoppingListStatus').textContent = 'Could not save the shopping list on this device.'; }
+      renderShoppingList();
+    }
+    function loadShoppingList() {
+      try {
+        const saved = JSON.parse(localStorage.getItem('grocery_planned_items') || '[]');
+        plannedItems = Array.isArray(saved) ? saved.filter(item => typeof item.name === 'string' && typeof item.id === 'string') : [];
+      } catch { plannedItems = []; }
+      renderShoppingList();
+    }
+    function addPlannedItem(name) {
+      name = name.trim();
+      if (!name) return;
+      plannedItems.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, name, completed: false });
+      saveShoppingList();
+    }
+    function selectPlannedItem(id) {
+      const item = plannedItems.find(item => item.id === id);
+      if (!item) return;
+      const input = document.getElementById('newItemName');
+      input.value = item.name;
+      validateInput();
+      input.focus();
+    }
+    function completePlannedItems(items) {
+      const names = new Set(items.map(item => item.name.trim().toLowerCase()));
+      let changed = false;
+      for (const item of plannedItems) if (!item.completed && names.has(item.name.trim().toLowerCase())) {
+        item.completed = true;
+        changed = true;
+      }
+      if (changed) saveShoppingList();
+    }
+    function clearPlannedItems() {
+      if (!confirm('Clear all items from your shopping list?')) return;
+      plannedItems = [];
+      saveShoppingList();
+    }
+    // SHOPPING LIST LOGIC END
+
+    function renderShoppingList() {
+      const list = document.getElementById('plannedItems');
+      list.replaceChildren();
+      if (!plannedItems.length) list.textContent = 'Your shopping list is empty.';
+      for (const item of plannedItems) {
+        const row = document.createElement('div');
+        row.className = `planned-row${item.completed ? ' completed' : ''}`;
+        const button = document.createElement('button');
+        button.type = 'button'; button.textContent = item.name;
+        button.setAttribute('aria-label', `${item.name}${item.completed ? ', picked up' : ', planned'}`);
+        button.onclick = () => selectPlannedItem(item.id);
+        row.append(button); list.append(row);
+      }
+    }
+    function toggleShoppingList(force) {
+      const panel = document.getElementById('shoppingList');
+      const open = force === undefined ? !panel.classList.contains('open') : force;
+      panel.classList.toggle('open', open);
+      document.getElementById('shoppingListPanel').inert = !open;
+      document.getElementById('shoppingListPill').setAttribute('aria-expanded', String(open));
+      if (!open) document.getElementById('shoppingListPill').focus();
+    }
+    function initializeFloatingTools() {
+      const pills = [document.getElementById('tripHistoryPill'), document.getElementById('shoppingListPill')];
+      const budget = document.getElementById('budgetDashboard');
+      const topBar = document.querySelector('.top-bar');
+      let settleTimer;
+      let lastClearance;
+      const measure = () => {
+        // Layout dimensions stay stable during panel transitions, focus and page scrolling.
+        // Only collapsed trigger buttons contribute, never the panels or their wrapper.
+        const clearance = Math.max(...pills.map(pill => pill.offsetWidth)) + 24;
+        const widestCard = Math.max(120, ...[...budget.querySelectorAll('.budget-card')].map(card => card.offsetWidth));
+        const narrow = document.documentElement.clientWidth - clearance < widestCard + 32;
+        const bottom = 72 + pills.reduce((height, pill) => height + pill.offsetHeight, 0) + 8;
+        const top = narrow ? Math.max(0, bottom - topBar.offsetHeight) : 0;
+        const value = `${top}px ${narrow ? 0 : clearance}px 0px 0px`;
+        // Keyboard height alone cannot affect these inputs or rewrite the inline style.
+        if (value === lastClearance) return;
+        lastClearance = value;
+        budget.style.setProperty('--budget-clearance', value);
+      };
+      const scheduleMeasure = () => {
+        clearTimeout(settleTimer);
+        settleTimer = setTimeout(measure, 200);
+      };
+      const observer = new ResizeObserver(scheduleMeasure);
+      pills.forEach(pill => observer.observe(pill));
+      observer.observe(topBar);
+      new MutationObserver(scheduleMeasure).observe(budget, { childList: true });
+      window.addEventListener('resize', scheduleMeasure);
+      window.visualViewport?.addEventListener('resize', scheduleMeasure);
+      document.getElementById('shoppingList').addEventListener('keydown', event => {
+        if (event.key === 'Escape') toggleShoppingList(false);
+      });
+      measure();
+    }
+    // KEYBOARD VIEWPORT RECOVERY START
+    function initializeKeyboardViewportRecovery() {
+      const viewport = window.visualViewport;
+      if (!viewport) return;
+      const editable = element => element?.matches?.('input, textarea, [contenteditable="true"]');
+      let restingHeight = viewport.height;
+      let restingWidth = document.documentElement.clientWidth;
+      let keyboardSession = false;
+      let settleTimer;
+      const recover = () => {
+        // Never fight an open keyboard or deliberate pinch zoom.
+        if (Math.abs(viewport.scale - 1) > 0.01) return;
+        const width = document.documentElement.clientWidth;
+        if (width !== restingWidth) {
+          restingWidth = width;
+          restingHeight = document.documentElement.clientHeight;
+        }
+        if (viewport.height < restingHeight - 80) return;
+        if (!keyboardSession) {
+          if (!editable(document.activeElement)) restingHeight = viewport.height;
+          return;
+        }
+        // Lists and panels own their scrolling; the outer document must stay at (0, 0).
+        const root = document.scrollingElement || document.documentElement;
+        if (window.scrollX || window.scrollY || root.scrollTop || document.body.scrollTop ||
+            viewport.offsetTop || viewport.offsetLeft) {
+          root.scrollTop = root.scrollLeft = 0;
+          document.body.scrollTop = document.body.scrollLeft = 0;
+          window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        }
+        // Keep listening through late animation frames instead of retiring on the first
+        // nearly-full-height event. Safari can apply another offset after that event.
+        if (viewport.height >= restingHeight - 2 && !viewport.offsetTop && !window.scrollY) {
+          restingHeight = viewport.height;
+          if (!editable(document.activeElement)) keyboardSession = false;
+        }
+      };
+      const schedule = () => {
+        clearTimeout(settleTimer);
+        settleTimer = setTimeout(recover, 250);
+      };
+      document.addEventListener('focusin', event => {
+        if (!editable(event.target)) return;
+        if (!keyboardSession) {
+          restingHeight = Math.max(restingHeight, viewport.height);
+          restingWidth = document.documentElement.clientWidth;
+        }
+        keyboardSession = true;
+      });
+      document.addEventListener('focusout', schedule);
+      viewport.addEventListener('resize', schedule);
+      viewport.addEventListener('scroll', schedule);
+      window.addEventListener('resize', schedule);
+      window.addEventListener('pageshow', schedule);
+    }
+    // KEYBOARD VIEWPORT RECOVERY END
+
     // PRICE HISTORY LOGIC START
     function comparePriceHistory(stored, scan) {
       if (!stored || !stored.history.length) return { status: 'new', delta: null };
@@ -917,6 +1112,7 @@
         // Commit and render the purchase before starting any history side effects.
         state.items.push(item);
         saveData();
+        completePlannedItems([item]);
         nameInput.value = priceInput.value = numberInput.value = '';
         validateInput();
         try {
@@ -1261,6 +1457,9 @@
 
     // INITIALIZATION & SERVICE WORKER (OFFLINE SUPPORT)
     loadData();
+    loadShoppingList();
+    initializeFloatingTools();
+    initializeKeyboardViewportRecovery();
     // A newly chosen photo supersedes any number left in the manual entry form.
     document.getElementById('cameraInput').addEventListener('change', event => {
       if (event.target.files?.length) document.getElementById('newItemNumber').value = '';

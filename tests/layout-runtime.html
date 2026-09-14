@@ -1,0 +1,39 @@
+<!doctype html><meta charset="utf-8"><title>Grocery layout runtime check</title>
+<style>body{margin:0;background:#222;color:white}iframe{border:0;width:390px;height:844px}pre{white-space:pre-wrap}</style>
+<iframe src="/"></iframe><pre id="result">RUNNING</pre>
+<script>
+const frame = document.querySelector('iframe');
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+frame.onload = async () => {
+  try {
+    const w = frame.contentWindow, d = frame.contentDocument;
+    w.eval(`state.profiles = [{id:'1',name:'Me',budget:300},{id:'2',name:'Partner',budget:200},{id:'3',name:'Family',budget:150}]; state.selectedProfileId='1'; render();`);
+    const bounds = id => {
+      const r = d.getElementById(id).getBoundingClientRect();
+      return { x:r.x, y:r.y, width:r.width, height:r.height, top:r.top, bottom:r.bottom };
+    };
+    const snapshot = () => ({ budget:bounds('budgetDashboard'), prices:bounds('tripHistoryPill'), shopping:bounds('shoppingListPill'), clearance:d.getElementById('budgetDashboard').getAttribute('style'), scrollY:w.scrollY });
+    const results = [];
+    for (const width of [320, 390, 900]) {
+      frame.style.width = width + 'px';
+      // Force iframe layout before dispatching the resize, including in headless virtual time.
+      void w.document.documentElement.clientWidth;
+      w.dispatchEvent(new w.Event('resize'));
+      await delay(700);
+      const before = snapshot();
+      d.getElementById('shoppingListPill').click();
+      await delay(400);
+      const input = d.getElementById('plannedItemName');
+      input.focus(); input.value = 'Runtime Cheese';
+      input.form.requestSubmit();
+      await delay(400);
+      const opened = snapshot();
+      d.getElementById('shoppingListPill').click();
+      await delay(400);
+      const after = snapshot();
+      results.push({ width, before, opened, after, identical:JSON.stringify(before)===JSON.stringify(after) });
+    }
+    document.getElementById('result').textContent = JSON.stringify(results, null, 2);
+  } catch (error) { document.getElementById('result').textContent = 'ERROR: ' + error.stack; }
+};
+</script>
