@@ -325,9 +325,15 @@
     .floating-tools > .trip-history { position: static; flex-shrink: 0; }
     .shopping-entry { display: flex; gap: 8px; margin: 12px 0; }
     .shopping-entry input { font-size: 16px; min-width: 0; flex: 1; background: var(--input-bg); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; }
-    .planned-row { margin: 6px 0; }
-    .planned-row button { width: 100%; text-align: left; overflow-wrap: anywhere; }
-    .planned-row.completed button { text-decoration: line-through; color: var(--text-secondary); }
+    .planned-row { position: relative; margin: 6px 0; overflow: hidden; border-radius: 16px; touch-action: pan-y; }
+    .planned-front { position: relative; display: flex; align-items: stretch; background: var(--card-bg); transition: transform .2s ease; }
+    .planned-row.swipe-open .planned-front { transform: translateX(-76px); }
+    .planned-front .planned-toggle { flex: 1; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+    .planned-row.completed .planned-toggle { text-decoration: line-through; color: var(--text-secondary); }
+    .planned-front .btn-delete-item { flex: 0 0 36px; padding: 6px; margin: 0; border: 0; background: transparent; color: var(--accent-red); }
+    .planned-row .planned-swipe-delete { position: absolute; right: 0; top: 0; bottom: 0; width: 76px; padding: 6px; border: 0; border-radius: 0; background: var(--accent-red); color: white; visibility: hidden; }
+    .planned-row.swipe-open .planned-swipe-delete { visibility: visible; }
+    @media (prefers-reduced-motion: reduce) { .planned-front { transition: none; } }
     .archive-actions { display: flex; justify-content: flex-end; gap: 16px; padding: 6px 0; }
     .archive-status { color: var(--text-secondary); font-size: .75rem; text-align: right; }
     .archive-dialog { position: fixed; inset: 0; margin: auto; width: min(420px, calc(100vw - 24px)); max-height: 75dvh; padding: 18px; background: var(--card-bg); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 16px; overflow-y: auto; }
@@ -430,7 +436,7 @@
           <input id="plannedItemName" type="text" placeholder="e.g. Cheese" aria-label="Planned item name" required>
           <button type="submit">Add</button>
         </form>
-        <p>Tap an item to fill its name below. It is crossed out after you add it to your trip.</p>
+        <p>Tap to cross off and fill its name below; tap again to undo. Purchases also cross off matching items. Swipe left or use × to delete a plan.</p>
         <div id="plannedItems"></div>
         <button type="button" onclick="clearPlannedItems()">Clear list</button>
         <p id="shoppingListStatus" role="status"></p>
@@ -463,10 +469,17 @@
     function selectPlannedItem(id) {
       const item = plannedItems.find(item => item.id === id);
       if (!item) return;
+      item.completed = !item.completed;
+      saveShoppingList();
+      if (!item.completed) return;
       const input = document.getElementById('newItemName');
       input.value = item.name;
       validateInput();
       input.focus();
+    }
+    function deletePlannedItem(id) {
+      plannedItems = plannedItems.filter(item => item.id !== id);
+      saveShoppingList();
     }
     function completePlannedItems(items) {
       const names = new Set(items.map(item => item.name.trim().toLowerCase()));
@@ -484,6 +497,52 @@
     }
     // SHOPPING LIST LOGIC END
 
+    function closePlannedSwipes() {
+      document.querySelectorAll('.planned-row.swipe-open').forEach(row => {
+        row.classList.remove('swipe-open');
+        row.querySelector('.planned-swipe-delete').disabled = true;
+      });
+    }
+    function bindPlannedSwipe(row) {
+      let startX, startY, dx = 0, horizontal = false, vertical = false;
+      let suppressClick = false, suppressTimer;
+      row.addEventListener('touchstart', event => {
+        horizontal = vertical = false; dx = 0; suppressClick = false;
+        clearTimeout(suppressTimer);
+        if (event.touches.length !== 1) { vertical = true; return; }
+        startX = event.touches[0].clientX; startY = event.touches[0].clientY;
+      }, { passive: true });
+      row.addEventListener('touchmove', event => {
+        if (vertical || event.touches.length !== 1) return;
+        dx = event.touches[0].clientX - startX;
+        const dy = event.touches[0].clientY - startY;
+        if (!horizontal && Math.max(Math.abs(dx), Math.abs(dy)) > 10) {
+          horizontal = Math.abs(dx) > Math.abs(dy) * 1.2;
+          vertical = !horizontal;
+        }
+        if (horizontal) { event.preventDefault(); suppressClick = true; }
+      }, { passive: false });
+      row.addEventListener('touchend', () => {
+        if (horizontal && Math.abs(dx) >= 48) {
+          closePlannedSwipes();
+          if (dx < 0) {
+            row.classList.add('swipe-open');
+            row.querySelector('.planned-swipe-delete').disabled = false;
+          }
+        }
+        suppressTimer = setTimeout(() => { suppressClick = false; }, 500);
+      });
+      row.addEventListener('touchcancel', () => { horizontal = false; closePlannedSwipes(); });
+      row.addEventListener('click', event => {
+        if (suppressClick) { event.preventDefault(); event.stopPropagation(); suppressClick = false; }
+      }, true);
+    }
+    function initializeShoppingGestures() {
+      document.addEventListener('pointerdown', event => {
+        if (!event.target.closest('.planned-row.swipe-open')) closePlannedSwipes();
+      }, { passive: true });
+    }
+
     function renderShoppingList() {
       const list = document.getElementById('plannedItems');
       list.replaceChildren();
@@ -493,15 +552,32 @@
         row.className = `planned-row${item.completed ? ' completed' : ''}`;
         const button = document.createElement('button');
         button.type = 'button'; button.textContent = item.name;
-        button.setAttribute('aria-label', `${item.name}${item.completed ? ', picked up' : ', planned'}`);
-        button.onclick = () => selectPlannedItem(item.id);
-        row.append(button); list.append(row);
+        button.className = 'planned-toggle';
+        button.setAttribute('aria-label', `${item.name}${item.completed ? ', crossed off' : ', planned'}`);
+        button.setAttribute('aria-pressed', String(item.completed));
+        button.onclick = () => {
+          if (row.classList.contains('swipe-open')) { closePlannedSwipes(); return; }
+          selectPlannedItem(item.id);
+        };
+        const remove = document.createElement('button');
+        remove.type = 'button'; remove.className = 'btn-delete-item'; remove.textContent = '×';
+        remove.setAttribute('aria-label', `Delete planned item ${item.name}`);
+        const swipeDelete = document.createElement('button');
+        swipeDelete.type = 'button'; swipeDelete.className = 'planned-swipe-delete'; swipeDelete.textContent = 'Delete';
+        swipeDelete.setAttribute('aria-label', `Delete planned item ${item.name}`);
+        swipeDelete.disabled = true;
+        remove.onclick = swipeDelete.onclick = () => deletePlannedItem(item.id);
+        const front = document.createElement('div'); front.className = 'planned-front';
+        front.append(button, remove);
+        row.append(swipeDelete, front); list.append(row);
+        bindPlannedSwipe(row);
       }
     }
     function toggleShoppingList(force) {
       const panel = document.getElementById('shoppingList');
       const open = force === undefined ? !panel.classList.contains('open') : force;
       panel.classList.toggle('open', open);
+      if (!open) closePlannedSwipes();
       document.getElementById('shoppingListPanel').inert = !open;
       document.getElementById('shoppingListPill').setAttribute('aria-expanded', String(open));
       if (!open) document.getElementById('shoppingListPill').focus();
@@ -1458,6 +1534,7 @@
     // INITIALIZATION & SERVICE WORKER (OFFLINE SUPPORT)
     loadData();
     loadShoppingList();
+    initializeShoppingGestures();
     initializeFloatingTools();
     initializeKeyboardViewportRecovery();
     // A newly chosen photo supersedes any number left in the manual entry form.

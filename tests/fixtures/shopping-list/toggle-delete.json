@@ -1,0 +1,8 @@
+[
+  { "case": "tap completes and prefills", "steps": ["tap"], "completed": true, "input": "Cheese" },
+  { "case": "second tap clears strike without changing form", "steps": ["tap", "edit", "tap"], "completed": false, "input": "Milk" },
+  { "case": "automatic completion can be manually reversed", "steps": ["purchase", "edit", "tap"], "completed": false, "input": "Milk" },
+  { "case": "delete unstruck item affects only plans", "steps": ["delete"], "deleted": true },
+  { "case": "delete struck item affects only plans", "steps": ["purchase", "delete"], "deleted": true },
+  { "case": "reload keeps final toggles and deletions", "steps": ["tap", "tap", "deleteOther", "reload"], "completed": false, "input": "" }
+]
