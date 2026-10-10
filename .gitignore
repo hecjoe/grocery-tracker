@@ -2,3 +2,5 @@
 node_modules/
 tests/.cache/
 tests/results/
+dist/
+.vite/
