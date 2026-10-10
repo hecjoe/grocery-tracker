@@ -995,6 +995,7 @@
     let state = {
       tripName: "Grocery Run",
       isEditingBudgets: false,
+      editingItemId: null,
       selectedProfileId: null,
       profiles: [
         { id: '1', name: "Me", budget: 300 }
@@ -1008,6 +1009,7 @@
       if (saved) {
         state = JSON.parse(saved);
         state.isEditingBudgets = false;
+        state.editingItemId = null;
       }
       if (state.profiles.length > 0 && !state.selectedProfileId) {
         state.selectedProfileId = state.profiles[0].id;
@@ -1075,6 +1077,15 @@
       state.items.forEach(item => {
         const profile = state.profiles.find(p => p.id === item.profileId);
         const total = item.unitPrice * item.quantity;
+        const isEditing = item.id === state.editingItemId;
+        const priceCell = isEditing
+          ? '<input type="number" step="0.01" min="0" inputmode="decimal" value="' + item.unitPrice + '" ' +
+            'style="width:70px; background:var(--input-bg); border:1px solid var(--border-color); color:var(--text-color); border-radius:6px; padding:4px 6px; font-size:0.85rem;" ' +
+            'onchange="updateItem(\'' + item.id + '\', \'unitPrice\', parseFloat(this.value))" ' +
+            'onkeydown="handleItemEditPriceKeydown(event, \'' + item.id + '\')">' +
+            '<button class="btn-edit" style="padding:4px 8px; font-size:0.78rem;" onclick="toggleEditItem(\'' + item.id + '\')">Done</button>'
+          : '<span style="font-size:0.85rem; color:var(--text-secondary)">x $' + item.unitPrice.toFixed(2) + '</span>' +
+            '<button class="btn-edit" style="padding:4px 8px; font-size:0.78rem;" onclick="toggleEditItem(\'' + item.id + '\')">Edit</button>';
 
         const row = document.createElement('div');
         row.className = 'item-row';
@@ -1089,7 +1100,7 @@
               <span>${item.quantity}</span>
               <button onclick="updateQuantity('${item.id}', 1)">+</button>
             </div>
-            <span style="font-size:0.85rem; color:var(--text-secondary)">x $${item.unitPrice.toFixed(2)}</span>
+            ${priceCell}
             <span style="font-weight:bold; min-width:60px; text-align:right">$${total.toFixed(2)}</span>
             <button class="btn-delete-item" onclick="deleteItem('${item.id}')">✕</button>
           </div>
@@ -1221,6 +1232,64 @@
         Object.assign(item, metadataForPurchasedItem(item.name, item.unitPrice));
         saveData();
       }
+    }
+
+    function toggleEditItem(id) {
+      state.editingItemId = state.editingItemId === id ? null : id;
+      render();
+    }
+
+    async function correctPurchasedItemHistory(item, newPrice) {
+      const scan = workingArchiveScans.get(item.archiveScanId);
+      if (!scan) {
+        document.getElementById('historyStorageStatus').textContent =
+          "Price history for this item wasn't recorded; the edit only updates this trip's list.";
+        return;
+      }
+      const historyKey = scan.itemNumber || scan.historyKey;
+      try {
+        const db = await openPriceHistory();
+        await new Promise((resolve, reject) => {
+          const transaction = db.transaction('items', 'readwrite');
+          const items = transaction.objectStore('items');
+          const request = items.get(historyKey);
+          request.onsuccess = () => {
+            const stored = request.result;
+            // Overwrite this trip's own observation in place; never append a second one.
+            const entry = stored?.history.find(entry => entry.date === scan.date);
+            if (stored && entry) {
+              entry.price = newPrice;
+              items.put(stored);
+            }
+          };
+          transaction.oncomplete = () => resolve();
+          transaction.onabort = () => reject(transaction.error || new Error('History correction aborted.'));
+        });
+        scan.price = newPrice;
+      } catch {
+        document.getElementById('historyStorageStatus').textContent = 'Could not correct price history for this edit.';
+      }
+    }
+
+    async function updateItem(id, key, value) {
+      const item = state.items.find(i => i.id === id);
+      if (!item) return;
+      if (key === 'unitPrice') {
+        if (!Number.isFinite(value) || value === item.unitPrice) return;
+        item.unitPrice = value;
+        await correctPurchasedItemHistory(item, value);
+      } else {
+        item[key] = value;
+      }
+      saveData();
+    }
+
+    async function handleItemEditPriceKeydown(event, id) {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      await updateItem(id, 'unitPrice', parseFloat(event.currentTarget.value));
+      state.editingItemId = null;
+      saveData();
     }
 
     function handleItemNameKeydown(event) {
