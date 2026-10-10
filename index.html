@@ -12,7 +12,7 @@
   <meta name="theme-color" content="#000000">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="apple-touch-icon" href="./icon.svg">
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="./tesseract/tesseract.min.js"></script>
 
   <style>
     :root {
@@ -1332,7 +1332,13 @@
         const original = canvas(bitmap.width, bitmap.height);
         original.getContext('2d').drawImage(bitmap, 0, 0);
         bitmap.close();
-        const worker = await Tesseract.createWorker('eng');
+        // Local assets only (no CDN) so scanning works with zero signal in-store.
+        // LSTM_ONLY matches the single core binary bundled: tesseract-core-lstm.wasm.js.
+        const worker = await Tesseract.createWorker('eng', Tesseract.OEM.LSTM_ONLY, {
+          workerPath: './tesseract/worker.min.js',
+          corePath: './tesseract/core/tesseract-core-lstm.wasm.js',
+          langPath: './tesseract/lang'
+        });
         let itemName = '', sellPrice = '', itemNumber = '';
         try {
           const read = async (input, mode = '6', digits = false) => {
@@ -1616,12 +1622,11 @@
     initializePriceHistory();
 
     if ('serviceWorker' in navigator) {
-      const swCode = `
-        self.addEventListener('install', e => e.waitUntil(caches.open('pwa-v1').then(c => c.addAll(['./']))));
-        self.addEventListener('fetch', e => e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))));
-      `;
-      const blob = new Blob([swCode], { type: 'application/javascript' });
-      navigator.serviceWorker.register(URL.createObjectURL(blob));
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(error => {
+          console.warn('Offline service worker was not registered:', error);
+        });
+      });
     }
   </script>
 </body>

@@ -3,12 +3,16 @@
   "private": true,
   "scripts": {
     "test": "node --test --test-concurrency=1 tests/*.test.cjs",
+    "prepare:ocr": "node scripts/prepare-ocr-assets.mjs",
+    "predev": "npm run prepare:ocr",
     "dev": "vite",
+    "prebuild": "npm run prepare:ocr",
     "build": "vite build",
     "preview": "vite preview"
   },
   "devDependencies": {
     "@napi-rs/canvas": "1.0.8",
+    "@tesseract.js-data/eng": "^1.0.0",
     "sharp": "0.34.5",
     "tesseract.js": "5.1.1",
     "vite": "^8.2.2"

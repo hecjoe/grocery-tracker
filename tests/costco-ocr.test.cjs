@@ -50,7 +50,11 @@ for (const fixture of expected) {
       Tesseract: {
         ...Tesseract,
         async createWorker(lang, oem = 1, options = {}, ...rest) {
-          const worker = await Tesseract.createWorker(lang, oem, { ...options, cachePath: cache }, ...rest);
+          // workerPath/corePath/langPath in index.html point at browser-only local
+          // assets (served from public/tesseract/); Node's own tesseract.js already
+          // resolves its worker/core from node_modules, so drop those here.
+          const { workerPath, corePath, langPath, ...nodeOptions } = options;
+          const worker = await Tesseract.createWorker(lang, oem, { ...nodeOptions, cachePath: cache }, ...rest);
           const recognize = worker.recognize.bind(worker);
           worker.recognize = async (...args) => {
             const result = await recognize(...args);
